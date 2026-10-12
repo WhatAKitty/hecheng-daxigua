@@ -341,6 +341,54 @@
     }
   }
 
+  // src/AdService.ts
+  var AD_UNITS = {
+    revive: "",
+    doubleScore: "",
+    dailyExtra: "",
+    bigStart: ""
+  };
+  function platform() {
+    const g = globalThis;
+    if (typeof g.wx !== "undefined" && g.wx && g.wx.createRewardedVideoAd) return "wx";
+    if (typeof g.tt !== "undefined" && g.tt && g.tt.createRewardedVideoAd) return "tt";
+    return "web";
+  }
+  function isMock() {
+    return platform() === "web";
+  }
+  var adCache = {};
+  function showRewardedVideo(placement, onReward, onFail) {
+    const pf = platform();
+    if (pf === "web") {
+      setTimeout(onReward, 1200);
+      return;
+    }
+    const api = pf === "wx" ? globalThis.wx : globalThis.tt;
+    const id = AD_UNITS[placement];
+    if (!api.createRewardedVideoAd || !id) {
+      onFail("广告位未配置");
+      return;
+    }
+    let ad = adCache[placement];
+    if (!ad) {
+      ad = api.createRewardedVideoAd({ adUnitId: id });
+      adCache[placement] = ad;
+    }
+    const onClose = (res) => {
+      ad.offClose(onClose);
+      if (res && (res.isEnded === void 0 || res.isEnded)) onReward();
+      else onFail("未完整观看");
+    };
+    ad.onClose(onClose);
+    ad.show().catch(() => {
+      ad.load().then(() => ad.show()).catch(() => {
+        ad.offClose(onClose);
+        onFail("广告加载失败");
+      });
+    });
+  }
+
   // src/Main.ts
   var { regClass } = Laya;
   var Main = class extends Laya.Script {
@@ -400,6 +448,16 @@
       this.nameCard = null;
       this.nameContent = null;
       this.overContent = null;
+      // ---- 广告激励状态 ----
+      this.reviveUsed = false;
+      // 每局限一次复活
+      this.doubledUsed = false;
+      // 每局限一次得分翻倍
+      this.reviveDim = null;
+      this.reviveContent = null;
+      this.mockAdDim = null;
+      this.goScoreText = null;
+      this.goBestText = null;
       this.physicsPaused = false;
       this.bubbles = [];
       this.evoDots = [];
@@ -611,6 +669,22 @@
         this.nameContent.destroy();
         this.nameContent = null;
       }
+      if (this.reviveDim) {
+        this.reviveDim.destroy();
+        this.reviveDim = null;
+      }
+      if (this.reviveContent) {
+        this.reviveContent.destroy();
+        this.reviveContent = null;
+      }
+      if (this.mockAdDim) {
+        this.mockAdDim.destroy();
+        this.mockAdDim = null;
+      }
+      this.reviveUsed = false;
+      this.doubledUsed = false;
+      this.goScoreText = null;
+      this.goBestText = null;
       this.setPhysicsPaused(false);
       this.prepareNext();
     }
@@ -856,6 +930,7 @@
       }
     }
     /** 死亡爆场：分数落袋 → 场上水果从上往下逐个爆掉 → 弹结算面板 */
+    /** 死亡流程入口：每局限一次的复活机会 → 放弃则爆场结算 */
     doGameOver() {
       this.gameOver = true;
       if (this.currentFruit) {
@@ -872,6 +947,102 @@
         this.dailyBest = this.score;
         this.saveDaily();
       }
+      if (!this.reviveUsed && this.fruits.length > 0) {
+        this.setPhysicsPaused(true);
+        this.showReviveOffer();
+        return;
+      }
+      this.continueDeathSequence();
+    }
+    /** 复活邀请面板（每局限一次） */
+    showReviveOffer() {
+      const dim = new Laya.Sprite();
+      dim.pos(-this.world.x, 0);
+      dim.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000cc");
+      dim.mouseEnabled = true;
+      dim.on(Laya.Event.MOUSE_DOWN, this, (e) => {
+        e.stopPropagation();
+        this.closeRevive();
+        this.continueDeathSequence();
+      });
+      this.uiLayer.addChild(dim);
+      this.reviveDim = dim;
+      const content = new Laya.Sprite();
+      this.uiLayer.addChild(content);
+      this.reviveContent = content;
+      const tx = (y, size, color, bold, text) => {
+        const t = new Laya.Text();
+        t.pos(0, y).size(750, size + 26);
+        t.fontSize = size;
+        t.color = color;
+        t.bold = bold;
+        t.align = "center";
+        t.valign = "middle";
+        t.text = text;
+        content.addChild(t);
+        return t;
+      };
+      tx(200, 56, "#ffe08a", true, "要复活吗？");
+      tx(290, 30, "#e0d6c2", false, "看广告清除危险线上方的水果");
+      tx(334, 30, "#e0d6c2", false, "继续本局，分数保留");
+      const btnRevive = this.makePillButton(375, 480, 380, 96, "#e5484d", "#ffffff", "看广告复活");
+      btnRevive.on(Laya.Event.MOUSE_DOWN, this, (e) => {
+        e.stopPropagation();
+        this.playReviveAd();
+      });
+      content.addChild(btnRevive);
+      const btnGiveUp = this.makePillButton(375, 610, 300, 84, "#fff8ea", "#a08b6f", "直接结束");
+      btnGiveUp.graphics.drawRoundRect(0, 0, 300, 84, 42, 42, 42, 42, "#fff8ea", "#d9a15c", 3);
+      btnGiveUp.on(Laya.Event.MOUSE_DOWN, this, (e) => {
+        e.stopPropagation();
+        this.closeRevive();
+        this.continueDeathSequence();
+      });
+      content.addChild(btnGiveUp);
+    }
+    closeRevive() {
+      if (this.reviveDim) {
+        this.reviveDim.destroy();
+        this.reviveDim = null;
+      }
+      if (this.reviveContent) {
+        this.reviveContent.destroy();
+        this.reviveContent = null;
+      }
+    }
+    playReviveAd() {
+      const closeMock = isMock() ? this.showMockAd() : null;
+      showRewardedVideo(
+        "revive",
+        () => {
+          if (closeMock) closeMock();
+          this.applyRevive();
+        },
+        () => {
+          if (closeMock) closeMock();
+          this.continueDeathSequence();
+        }
+      );
+    }
+    /** 复活：关闭邀请面板，清除危险线上方的水果，继续本局 */
+    applyRevive() {
+      this.closeRevive();
+      this.reviveUsed = true;
+      const doomed = this.fruits.filter((f) => this.fruitCenter(f).y < this.DANGER_Y);
+      for (const f of doomed) {
+        const c = this.fruitCenter(f);
+        const light = FRUITS[f.level].light;
+        this.removeFruit(f);
+        this.burst(c.x, c.y, 6, light);
+      }
+      this.setPhysicsPaused(false);
+      this.gameOver = false;
+      this.dropCooldown = 600;
+      this.sfx(0);
+    }
+    /** 死亡爆场：场上水果从上往下逐个爆掉 → 弹结算面板 */
+    continueDeathSequence() {
+      this.setPhysicsPaused(false);
       this.restartAt = Date.now() + 999999;
       const doomed = [...this.fruits].sort((a, b) => a.y - b.y);
       doomed.forEach((f, i) => {
@@ -885,6 +1056,30 @@
         });
       });
       Laya.timer.once(doomed.length * 70 + 400, this, () => this.showGameOverPanel());
+    }
+    /** Web 端模拟广告面板：1.2s 后由 AdService 回调关闭 */
+    showMockAd() {
+      const dim = new Laya.Sprite();
+      dim.pos(-this.world.x, 0);
+      dim.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000e6");
+      dim.mouseEnabled = true;
+      dim.on(Laya.Event.MOUSE_DOWN, this, (e) => e.stopPropagation());
+      const t = new Laya.Text();
+      t.pos(0, 0).size(750, Laya.stage.height);
+      t.fontSize = 40;
+      t.color = "#ffe08a";
+      t.align = "center";
+      t.valign = "middle";
+      t.text = "广告模拟中...\n\n（小游戏端为真实激励视频）";
+      dim.addChild(t);
+      this.uiLayer.addChild(dim);
+      this.mockAdDim = dim;
+      return () => {
+        if (this.mockAdDim) {
+          this.mockAdDim.destroy();
+          this.mockAdDim = null;
+        }
+      };
     }
     showGameOverPanel() {
       this.restartAt = Date.now() + 800;
@@ -905,10 +1100,11 @@
         const t = this.makeText(0, y, 750, size + 30, size, color, bold);
         t.text = text;
         content.addChild(t);
+        return t;
       };
       mk(310, 68, "#ffffff", true, "游戏结束");
-      mk(415, 44, "#ffe08a", true, `本局得分 ${this.score}`);
-      mk(485, 30, "#e0d6c2", false, `今日最高 ${this.dailyBest} · 历史最高 ${this.bestScore}`);
+      this.goScoreText = mk(415, 44, "#ffe08a", true, `本局得分 ${this.score}`);
+      this.goBestText = mk(485, 30, "#e0d6c2", false, `今日最高 ${this.dailyBest} · 历史最高 ${this.bestScore}`);
       const def = FRUITS[this.maxLevelAchieved];
       const r = 64;
       const icon = new Laya.Sprite();
@@ -920,19 +1116,30 @@
       icon.pos(375 - r, 570);
       content.addChild(icon);
       mk(718, 32, "#ffffff", true, `最大合成：${def.name}`);
-      const btnShare = this.makePillButton(222, 872, 280, 92, "#e5484d", "#ffffff", "战绩卡");
+      if (!this.doubledUsed && this.score > 0) {
+        const btn2x = this.makePillButton(375, 806, 340, 84, "#9b6bdf", "#ffffff", "看广告 得分×2");
+        btn2x.on(Laya.Event.MOUSE_DOWN, this, (e) => {
+          e.stopPropagation();
+          this.playDoubleAd(btn2x);
+        });
+        content.addChild(btn2x);
+      }
+      const btnShare = this.makePillButton(222, 930, 280, 92, "#e5484d", "#ffffff", "战绩卡");
       btnShare.on(Laya.Event.MOUSE_DOWN, this, (e) => {
         e.stopPropagation();
         this.openShareCard();
       });
       content.addChild(btnShare);
-      const btnLb = this.makePillButton(528, 872, 280, 92, "#f7ce46", "#5a4632", "排行榜");
+      const btnLb = this.makePillButton(528, 930, 280, 92, "#f7ce46", "#5a4632", "排行榜");
       btnLb.on(Laya.Event.MOUSE_DOWN, this, (e) => {
         e.stopPropagation();
         this.showLeaderboard();
       });
       content.addChild(btnLb);
-      mk(1e3, 30, "#ffffff", true, "点击屏幕 重新开始");
+      mk(1060, 30, "#ffffff", true, "点击屏幕 重新开始");
+      if (platform() === "web") {
+        mk(1112, 24, "#a08b6f", false, "抖音/微信搜《合成大西瓜》· 排行榜全球同服");
+      }
       const ensureNameAndSubmit = () => {
         if (getPlayerName() === "无名瓜农" && !Laya.LocalStorage.getItem("sg_named")) {
           this.showNameCard(() => this.submitScore());
@@ -941,6 +1148,41 @@
         }
       };
       Laya.timer.once(600, this, ensureNameAndSubmit);
+    }
+    /** 激励点②：看广告本局得分×2（排行榜按最高分记名，重复提交幂等） */
+    playDoubleAd(btn) {
+      if (this.doubledUsed) return;
+      this.doubledUsed = true;
+      const closeMock = isMock() ? this.showMockAd() : null;
+      showRewardedVideo(
+        "doubleScore",
+        () => {
+          if (closeMock) closeMock();
+          this.applyDouble(btn);
+        },
+        () => {
+          if (closeMock) closeMock();
+          this.doubledUsed = false;
+        }
+      );
+    }
+    applyDouble(btn) {
+      this.score *= 2;
+      if (this.score > this.bestScore) {
+        this.bestScore = this.score;
+        this.saveBest(this.bestScore);
+      }
+      if (this.score > this.dailyBest) {
+        this.dailyBest = this.score;
+        this.saveDaily();
+      }
+      this.updateScoreUI();
+      if (this.goScoreText) this.goScoreText.text = `本局得分 ${this.score}（已翻倍）`;
+      if (this.goBestText) this.goBestText.text = `今日最高 ${this.dailyBest} · 历史最高 ${this.bestScore}`;
+      pulse(this.goScoreText ? this.goScoreText : this.scoreText, 1.3, 200);
+      if (btn && !btn.destroyed) btn.destroy();
+      confetti(this.fxLayer, 30);
+      this.submitScore();
     }
     /** 提交本局分数到排行榜（远程未配置时自动走本地 bot 榜） */
     submitScore() {
