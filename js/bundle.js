@@ -477,6 +477,7 @@
       onDone();
       return;
     }
+    fetch(`https://html5.gamemonetize.com/embed.js?g=${GM_GAME_ID}&t=${Date.now()}`, { mode: "no-cors", cache: "no-store" }).then(() => onStep("网络", true, "可达")).catch(() => onStep("网络", false, "不可达（DNS/防火墙/代理拦截）"));
     const s = document.createElement("script");
     s.src = `https://html5.gamemonetize.com/embed.js?g=${GM_GAME_ID}&t=${Date.now()}`;
     let settled = false;
@@ -486,7 +487,7 @@
       onStep("SDK 加载", false, msg);
       onDone();
     };
-    s.onerror = () => fail("网络不可达");
+    s.onerror = () => fail("服务器拒绝(404)：游戏未过审或 ID 有误（去 GM 后台看状态）");
     s.onload = () => {
       let n = 0;
       const t = setInterval(() => {
