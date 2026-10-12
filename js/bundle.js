@@ -348,7 +348,7 @@
     dailyExtra: "",
     bigStart: ""
   };
-  var GM_GAME_ID = "";
+  var GM_GAME_ID = "btex3y0n9vbh92sdvoet28xwpof0lpu6";
   function platform() {
     const g = globalThis;
     if (typeof g.wx !== "undefined" && g.wx && g.wx.createRewardedVideoAd) return "wx";
@@ -376,9 +376,7 @@
           ok ? resolve() : reject(new Error("gm init fail"));
         }
       };
-      const s = document.createElement("script");
-      s.src = `https://html5.gamemonetize.com/embed.js?g=${GM_GAME_ID}`;
-      s.onload = () => {
+      const arm = () => {
         let n = 0;
         const t = setInterval(() => {
           if (typeof window.SDK === "function") {
@@ -393,6 +391,13 @@
           }
         }, 200);
       };
+      if (document.querySelector('script[src*="gamemonetize"]')) {
+        arm();
+        return;
+      }
+      const s = document.createElement("script");
+      s.src = `https://html5.gamemonetize.com/embed.js?g=${GM_GAME_ID}`;
+      s.onload = arm;
       s.onerror = () => {
         gmDead = true;
         done(false);
