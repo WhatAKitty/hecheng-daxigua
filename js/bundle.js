@@ -407,21 +407,30 @@
       }
       this.bestScore = this.loadBest();
       this.loadDaily();
+      this.world = new Laya.Sprite();
       this.gameLayer = new Laya.Sprite();
       this.fxLayer = new Laya.Sprite();
       this.uiLayer = new Laya.Sprite();
       const root = this.owner;
-      root.addChild(this.gameLayer);
-      root.addChild(this.fxLayer);
-      root.addChild(this.uiLayer);
+      root.addChild(this.world);
+      this.world.addChild(this.gameLayer);
+      this.world.addChild(this.fxLayer);
+      this.world.addChild(this.uiLayer);
       this.buildAmbience();
       root.mouseEnabled = true;
       if (root.parent) root.parent.mouseEnabled = true;
       this.uiLayer.mouseEnabled = true;
+      this.centerWorld();
+      Laya.stage.on(Laya.Event.RESIZE, this, this.centerWorld);
       this.buildHUD();
       Laya.stage.on(Laya.Event.MOUSE_DOWN, this, this.onMouseDown);
       Laya.stage.on(Laya.Event.MOUSE_MOVE, this, this.onMouseMove);
       Laya.stage.on(Laya.Event.MOUSE_UP, this, this.onMouseUp);
+    }
+    /** 游戏内容列在扩展舞台中水平居中（fixedauto 宽屏下 stage.width > 750） */
+    centerWorld() {
+      if (!this.world) return;
+      this.world.pos(Math.max(0, (Laya.stage.width - 750) / 2), 0);
     }
     /** 背景氛围：缓慢上浮的半透明气泡（深度感） */
     buildAmbience() {
@@ -648,7 +657,8 @@
     moveCurrent(stageX) {
       if (!this.currentFruit) return;
       const r = this.currentFruit.radius;
-      const x = Math.max(this.WALL_L + r, Math.min(this.WALL_R - r, stageX));
+      const localX = stageX - (this.world ? this.world.x : 0);
+      const x = Math.max(this.WALL_L + r, Math.min(this.WALL_R - r, localX));
       this.currentFruit.pos(x - r, this.DROP_Y - r);
       this.aimLine.pos(x, 0);
     }
@@ -850,7 +860,8 @@
       this.restartAt = Date.now() + 800;
       this.scoreText.text = `${this.score}`;
       const panel = new Laya.Sprite();
-      panel.graphics.drawRect(0, 0, 750, Laya.stage.height, "#000000b3");
+      panel.pos(-this.world.x, 0);
+      panel.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000b3");
       panel.mouseEnabled = true;
       panel.on(Laya.Event.MOUSE_DOWN, this, () => {
         if (!this.shareCard && !this.lbPanel && Date.now() > this.restartAt) this.resetRound();
@@ -910,7 +921,8 @@
       if (this.lbPanel) return;
       if (!this.gameOver) this.setPhysicsPaused(true);
       const panel = new Laya.Sprite();
-      panel.graphics.drawRect(0, 0, 750, Laya.stage.height, "#000000b3");
+      panel.pos(-this.world.x, 0);
+      panel.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000b3");
       panel.mouseEnabled = true;
       this.uiLayer.addChild(panel);
       this.lbPanel = panel;
@@ -975,7 +987,8 @@
       } catch (e) {
       }
       const panel = new Laya.Sprite();
-      panel.graphics.drawRect(0, 0, 750, Laya.stage.height, "#000000b3");
+      panel.pos(-this.world.x, 0);
+      panel.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000b3");
       panel.mouseEnabled = true;
       this.uiLayer.addChild(panel);
       this.nameCard = panel;
