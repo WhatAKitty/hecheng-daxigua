@@ -76,11 +76,14 @@
       this.alive = true;
       /** 已进入合成队列（防重复配对） */
       this.merging = false;
-      /** 是否已落到危险线以下过（坠落途中不计超时） */
-      this.crossed = false;
       /** 持续压线时长(ms) */
       this.overSince = 0;
       this.bornAt = 0;
+      /** 实时速度(px/s)，由主循环计算：落定判定（合成/判负）用 */
+      this.speed = 0;
+      /** 上一帧位置 */
+      this.lastX = 0;
+      this.lastY = 0;
       this.level = level;
       const def = FRUITS[level];
       const r = def.radius;
@@ -243,7 +246,7 @@
   }
 
   // src/Leaderboard.ts
-  var WORKER_URL = "";
+  var WORKER_URL = "https://hecheng-leaderboard.hecheng-daxigua.workers.dev";
   var BOT_NAMES = [
     "西瓜骑士",
     "吃瓜群众",
@@ -357,6 +360,9 @@
       this.DROP_Y = 300;
       // 投放高度
       this.WALL_THICK = 26;
+      // 墙厚（视觉）
+      /** 落定速度阈值(px/s)：低于它视为"落定"（合成/判负的前提） */
+      this.SETTLE_SPEED = 220;
       // HUD / 结算
       // ---- 游戏状态 ----
       this.fruits = [];
@@ -677,6 +683,8 @@
       const r = f.radius;
       f.pos(x - r, y - r);
       f.bornAt = Date.now();
+      f.lastX = f.x;
+      f.lastY = f.y;
       this.gameLayer.addChild(f);
       if (alive && anim === "pop") popIn(f);
       const rb = f.addComponent(Laya.RigidBody);
@@ -691,6 +699,7 @@
       if (alive) {
         this.fruits.push(f);
         f.on(Laya.Event.TRIGGER_ENTER, this, this.onFruitCollision);
+        f.on(Laya.Event.TRIGGER_STAY, this, this.onFruitCollision);
       }
       return f;
     }
@@ -704,6 +713,7 @@
       if (!listener.alive || !other.alive) return;
       if (listener.merging || other.merging) return;
       if (listener.level !== other.level) return;
+      if (listener.speed > this.SETTLE_SPEED || other.speed > this.SETTLE_SPEED) return;
       listener.merging = true;
       other.merging = true;
       this.mergeQueue.push([listener, other]);
@@ -744,7 +754,6 @@
             Math.min(this.WALL_R - newDef.radius, cxm)
           );
           const newFruit = this.spawnFruit(level + 1, cx, cy);
-          newFruit.crossed = cy > this.DANGER_Y;
           this.addScore(newDef.score * mult, cx, cy - newDef.radius, mult);
           this.burst(cx, cy, 8 + level, newDef.light);
           if (level + 1 >= 8) confetti(this.fxLayer, 26);
@@ -787,13 +796,19 @@
           this.drawNextPreview();
         }
       }
+      for (const f of this.fruits) {
+        const dx = f.x - f.lastX, dy = f.y - f.lastY;
+        const inst = Math.sqrt(dx * dx + dy * dy) * 1e3 / Math.max(dt, 1);
+        f.speed = f.speed * 0.6 + inst * 0.4;
+        f.lastX = f.x;
+        f.lastY = f.y;
+      }
       let danger = false;
       if (!this.gameOver) {
         for (const f of this.fruits) {
-          if (Date.now() - f.bornAt < 400) continue;
+          if (Date.now() - f.bornAt < 500) continue;
           const cy = this.fruitCenter(f).y;
-          if (!f.crossed && cy > this.DANGER_Y) f.crossed = true;
-          if (f.crossed && cy < this.DANGER_Y) {
+          if (cy < this.DANGER_Y && f.speed < this.SETTLE_SPEED) {
             f.overSince += dt;
             danger = true;
             if (f.overSince > 2e3) {
