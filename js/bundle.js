@@ -396,7 +396,10 @@
       this.scoreShown = 0;
       this.comboText = null;
       this.lbPanel = null;
+      this.lbContent = null;
       this.nameCard = null;
+      this.nameContent = null;
+      this.overContent = null;
       this.physicsPaused = false;
       this.bubbles = [];
       this.evoDots = [];
@@ -584,6 +587,10 @@
         this.overPanel.destroy();
         this.overPanel = null;
       }
+      if (this.overContent) {
+        this.overContent.destroy();
+        this.overContent = null;
+      }
       if (this.shareCard) {
         this.shareCard.destroy();
         this.shareCard = null;
@@ -592,9 +599,17 @@
         this.lbPanel.destroy();
         this.lbPanel = null;
       }
+      if (this.lbContent) {
+        this.lbContent.destroy();
+        this.lbContent = null;
+      }
       if (this.nameCard) {
         this.nameCard.destroy();
         this.nameCard = null;
+      }
+      if (this.nameContent) {
+        this.nameContent.destroy();
+        this.nameContent = null;
       }
       this.setPhysicsPaused(false);
       this.prepareNext();
@@ -874,19 +889,22 @@
     showGameOverPanel() {
       this.restartAt = Date.now() + 800;
       this.scoreText.text = `${this.score}`;
-      const panel = new Laya.Sprite();
-      panel.pos(-this.world.x, 0);
-      panel.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000b3");
-      panel.mouseEnabled = true;
-      panel.on(Laya.Event.MOUSE_DOWN, this, () => {
+      const dim = new Laya.Sprite();
+      dim.pos(-this.world.x, 0);
+      dim.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000b3");
+      dim.mouseEnabled = true;
+      dim.on(Laya.Event.MOUSE_DOWN, this, () => {
         if (!this.shareCard && !this.lbPanel && Date.now() > this.restartAt) this.resetRound();
       });
-      this.uiLayer.addChild(panel);
-      this.overPanel = panel;
+      this.uiLayer.addChild(dim);
+      this.overPanel = dim;
+      const content = new Laya.Sprite();
+      this.uiLayer.addChild(content);
+      this.overContent = content;
       const mk = (y, size, color, bold, text) => {
         const t = this.makeText(0, y, 750, size + 30, size, color, bold);
         t.text = text;
-        panel.addChild(t);
+        content.addChild(t);
       };
       mk(310, 68, "#ffffff", true, "游戏结束");
       mk(415, 44, "#ffe08a", true, `本局得分 ${this.score}`);
@@ -900,20 +918,20 @@
       iconInner.scale(k, k);
       icon.addChild(iconInner);
       icon.pos(375 - r, 570);
-      panel.addChild(icon);
+      content.addChild(icon);
       mk(718, 32, "#ffffff", true, `最大合成：${def.name}`);
       const btnShare = this.makePillButton(222, 872, 280, 92, "#e5484d", "#ffffff", "战绩卡");
       btnShare.on(Laya.Event.MOUSE_DOWN, this, (e) => {
         e.stopPropagation();
         this.openShareCard();
       });
-      panel.addChild(btnShare);
+      content.addChild(btnShare);
       const btnLb = this.makePillButton(528, 872, 280, 92, "#f7ce46", "#5a4632", "排行榜");
       btnLb.on(Laya.Event.MOUSE_DOWN, this, (e) => {
         e.stopPropagation();
         this.showLeaderboard();
       });
-      panel.addChild(btnLb);
+      content.addChild(btnLb);
       mk(1e3, 30, "#ffffff", true, "点击屏幕 重新开始");
       const ensureNameAndSubmit = () => {
         if (getPlayerName() === "无名瓜农" && !Laya.LocalStorage.getItem("sg_named")) {
@@ -935,18 +953,19 @@
     showLeaderboard() {
       if (this.lbPanel) return;
       if (!this.gameOver) this.setPhysicsPaused(true);
-      const panel = new Laya.Sprite();
-      panel.pos(-this.world.x, 0);
-      panel.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000b3");
-      panel.mouseEnabled = true;
-      this.uiLayer.addChild(panel);
-      this.lbPanel = panel;
+      const dim = new Laya.Sprite();
+      dim.pos(-this.world.x, 0);
+      dim.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000b3");
+      dim.mouseEnabled = true;
+      this.uiLayer.addChild(dim);
+      this.lbPanel = dim;
       const card = new Laya.Sprite();
       const W = 660, H = 1080;
-      card.pos(45, Math.max(60, (Laya.stage.height - H) / 2 - 40));
+      card.pos(45, Math.max(60, (1334 - H) / 2 - 40));
       card.mouseEnabled = true;
       card.graphics.drawRect(0, 0, W, H, "#fff8ea", "#d9a15c", 4);
-      panel.addChild(card);
+      this.uiLayer.addChild(card);
+      this.lbContent = card;
       card.on(Laya.Event.MOUSE_DOWN, this, (e) => e.stopPropagation());
       card.on(Laya.Event.MOUSE_UP, this, (e) => e.stopPropagation());
       const tx = (parent, x, y, w, size, color, bold, text, align = "center") => {
@@ -970,12 +989,14 @@
       closeBtn.on(Laya.Event.MOUSE_DOWN, this, (e) => {
         e.stopPropagation();
         this.setPhysicsPaused(false);
-        panel.destroy();
+        dim.destroy();
+        card.destroy();
         this.lbPanel = null;
+        this.lbContent = null;
       });
       card.addChild(closeBtn);
       fetchTop(10).then((entries) => {
-        if (this.lbPanel !== panel || panel.destroyed) return;
+        if (this.lbPanel !== dim || dim.destroyed || card.destroyed) return;
         loading.text = "";
         if (entries.length === 0) {
           loading.text = "还没有人上榜，快来抢第一！";
@@ -1001,18 +1022,19 @@
         Laya.LocalStorage.setItem("sg_named", "1");
       } catch (e) {
       }
-      const panel = new Laya.Sprite();
-      panel.pos(-this.world.x, 0);
-      panel.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000b3");
-      panel.mouseEnabled = true;
-      this.uiLayer.addChild(panel);
-      this.nameCard = panel;
+      const dim = new Laya.Sprite();
+      dim.pos(-this.world.x, 0);
+      dim.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000b3");
+      dim.mouseEnabled = true;
+      this.uiLayer.addChild(dim);
+      this.nameCard = dim;
       const card = new Laya.Sprite();
       const W = 640, H = 560;
-      card.pos(55, Math.max(120, (Laya.stage.height - H) / 2 - 60));
+      card.pos(55, Math.max(120, (1334 - H) / 2 - 60));
       card.mouseEnabled = true;
       card.graphics.drawRect(0, 0, W, H, "#fff8ea", "#d9a15c", 4);
-      panel.addChild(card);
+      this.uiLayer.addChild(card);
+      this.nameContent = card;
       card.on(Laya.Event.MOUSE_DOWN, this, (e) => e.stopPropagation());
       card.on(Laya.Event.MOUSE_UP, this, (e) => e.stopPropagation());
       const title = new Laya.Text();
@@ -1052,8 +1074,10 @@
       btnOk.on(Laya.Event.MOUSE_DOWN, this, (e) => {
         e.stopPropagation();
         setPlayerName(name);
-        panel.destroy();
+        dim.destroy();
+        card.destroy();
         this.nameCard = null;
+        this.nameContent = null;
         onDone();
       });
       card.addChild(btnOk);
