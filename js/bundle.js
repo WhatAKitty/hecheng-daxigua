@@ -478,7 +478,7 @@
         { x: 375, y: 250, w: 300, h: 300, round: true, title: "投放水果", text: "按住屏幕左右拖动瞄准\n松手投放水果" },
         { x: 375, y: 430, w: 660, h: 90, round: false, title: "危险线", text: "水果堆过红色虚线 2 秒\n本局就结束了" },
         { x: 375, y: 196, w: 620, h: 70, round: false, title: "合成升级", text: "相同水果相碰合成更大的\n从樱桃一路合到西瓜" },
-        { x: 96, y: 66, w: 170, h: 70, round: true, title: "每日挑战", text: "全球玩家每天同一序列\n点排行榜看你的排名" }
+        { x: 96, y: 40, w: 170, h: 66, round: true, title: "每日挑战", text: "全球玩家每天同一序列\n点排行榜看你的排名" }
       ];
     }
     onStart() {
@@ -573,10 +573,10 @@
       col.shapes = [chain];
     }
     buildHUD() {
-      this.scoreText = this.makeText(0, 44, 750, 64, 50, "#5a4632", true);
-      const dayText = this.makeText(0, 106, 750, 28, 24, "#e5484d", true);
+      this.scoreText = this.makeText(0, 84, 750, 64, 50, "#5a4632", true);
+      const dayText = this.makeText(0, 150, 750, 28, 24, "#e5484d", true);
       dayText.text = `每日挑战 · ${dailyLabel()}`;
-      this.bestText = this.makeText(0, 136, 750, 30, 24, "#a08b6f", false);
+      this.bestText = this.makeText(0, 182, 750, 30, 24, "#a08b6f", false);
       const dotAreaW = 560;
       const startX = (750 - dotAreaW) / 2;
       for (let i = 0; i <= MAX_LEVEL; i++) {
@@ -585,15 +585,15 @@
         dot.size(r * 2, r * 2);
         const def = FRUITS[i];
         dot.graphics.drawCircle(r, r, r - 1, def.color, def.dark, 2);
-        dot.pos(startX + dotAreaW / MAX_LEVEL * i - r, 196);
+        dot.pos(startX + dotAreaW / MAX_LEVEL * i - r, 240);
         dot.alpha = 0.22;
         this.uiLayer.addChild(dot);
         this.evoDots.push(dot);
       }
-      const nextTitle = this.makeText(750 - 170, 44, 120, 30, 26, "#a08b6f", false);
+      const nextTitle = this.makeText(750 - 170, 84, 120, 30, 26, "#a08b6f", false);
       nextTitle.text = "下一个";
       this.nextLabel = new Laya.Sprite();
-      this.nextLabel.pos(750 - 110, 108);
+      this.nextLabel.pos(750 - 110, 146);
       this.uiLayer.addChild(this.nextLabel);
       this.dangerLine = new Laya.Sprite();
       const dg = this.dangerLine.graphics;
@@ -609,13 +609,13 @@
       this.aimLine.pos(375, 0);
       this.aimLine.alpha = 0.5;
       this.uiLayer.addChild(this.aimLine);
-      const lbBtn = this.makePillButton(96, 66, 152, 62, "#f7ce46", "#5a4632", "排行榜");
+      const lbBtn = this.makePillButton(96, 40, 152, 60, "#f7ce46", "#5a4632", "排行榜");
       lbBtn.on(Laya.Event.MOUSE_DOWN, this, (e) => {
         e.stopPropagation();
         this.showLeaderboard();
       });
       this.uiLayer.addChild(lbBtn);
-      const helpBtn = this.makePillButton(262, 66, 132, 62, "#5fb75f", "#ffffff", "玩法");
+      const helpBtn = this.makePillButton(262, 40, 132, 60, "#5fb75f", "#ffffff", "玩法");
       helpBtn.on(Laya.Event.MOUSE_DOWN, this, (e) => {
         e.stopPropagation();
         this.showTour();
@@ -905,7 +905,6 @@
       if (alive) {
         this.fruits.push(f);
         f.on(Laya.Event.TRIGGER_ENTER, this, this.onFruitCollision);
-        f.on(Laya.Event.TRIGGER_STAY, this, this.onFruitCollision);
       }
       return f;
     }
@@ -919,7 +918,6 @@
       if (!listener.alive || !other.alive) return;
       if (listener.merging || other.merging) return;
       if (listener.level !== other.level) return;
-      if (listener.speed > this.SETTLE_SPEED || other.speed > this.SETTLE_SPEED) return;
       listener.merging = true;
       other.merging = true;
       this.mergeQueue.push([listener, other]);
