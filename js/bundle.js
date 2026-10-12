@@ -432,6 +432,8 @@
       this.containerBuilt = false;
       /** 当前瞄准的活动触点 id（多点触控过滤，-1 表示桌面鼠标） */
       this.activeTouchId = -1;
+      /** 输入锁：面板关闭瞬间吞掉同一次点击的残余事件（如排行榜关闭后误投放） */
+      this.inputLockUntil = 0;
       // ---- 每日挑战 ----
       /** 日期种子驱动的投放序列 RNG（同一天全球玩家序列一致） */
       this.rng = Math.random;
@@ -719,7 +721,7 @@
     // ==================================================================
     onMouseDown(e) {
       var _a;
-      if (this.lbPanel) return;
+      if (this.lbPanel || Date.now() < this.inputLockUntil) return;
       this.ensureAudio();
       if (this.gameOver) {
         if (this.shareCard) return;
@@ -730,11 +732,11 @@
       this.moveCurrent(e.stageX);
     }
     onMouseMove(e) {
-      if (this.gameOver || this.lbPanel || !this.isPrimaryTouch(e)) return;
+      if (this.gameOver || this.lbPanel || Date.now() < this.inputLockUntil || !this.isPrimaryTouch(e)) return;
       this.moveCurrent(e.stageX);
     }
     onMouseUp(e) {
-      if (this.gameOver || this.lbPanel || !this.physicsReady || !this.isPrimaryTouch(e) || !this.currentFruit || this.dropCooldown > 0) return;
+      if (this.gameOver || this.lbPanel || Date.now() < this.inputLockUntil || !this.physicsReady || !this.isPrimaryTouch(e) || !this.currentFruit || this.dropCooldown > 0) return;
       const c = this.fruitCenter(this.currentFruit);
       const f = this.spawnFruit(this.currentFruit.level, c.x, this.DROP_Y, true, "none");
       squash(f);
@@ -1235,6 +1237,7 @@
         card.destroy();
         this.lbPanel = null;
         this.lbContent = null;
+        this.inputLockUntil = Date.now() + 300;
       });
       card.addChild(closeBtn);
       fetchTop(10).then((entries) => {
