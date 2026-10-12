@@ -465,6 +465,69 @@
       });
     });
   }
+  function testRewardedAd(onStep, onDone) {
+    onStep("平台", true, platform() === "web" ? "Web" : platform());
+    if (platform() !== "web") {
+      onStep("仅 Web 端可测", false, "小游戏端请在开发者工具调试");
+      onDone();
+      return;
+    }
+    onStep("游戏 ID", !!GM_GAME_ID, GM_GAME_ID || "未配置");
+    if (!GM_GAME_ID) {
+      onDone();
+      return;
+    }
+    const s = document.createElement("script");
+    s.src = `https://html5.gamemonetize.com/embed.js?g=${GM_GAME_ID}&t=${Date.now()}`;
+    let settled = false;
+    const fail = (msg) => {
+      if (settled) return;
+      settled = true;
+      onStep("SDK 加载", false, msg);
+      onDone();
+    };
+    s.onerror = () => fail("网络不可达");
+    s.onload = () => {
+      let n = 0;
+      const t = setInterval(() => {
+        if (typeof window.SDK === "function") {
+          clearInterval(t);
+          if (settled) return;
+          settled = true;
+          onStep("SDK 加载", true, "就绪");
+          try {
+            const sdk = window.SDK();
+            if (!sdk || !sdk.adv || !sdk.adv.show) {
+              onStep("激励视频", false, "adv 接口缺失");
+              onDone();
+              return;
+            }
+            onStep("激励视频", true, "请求中…（看完/关闭后出结果）");
+            sdk.adv.show("rewarded", {
+              onClose: (wasRewarded) => {
+                onStep("广告结果", !!wasRewarded, wasRewarded ? "完整观看 ✓（计费有效）" : "中途关闭（不计费）");
+                onDone();
+              },
+              onError: (err) => {
+                onStep("广告结果", false, "错误: " + String(err && err.message || err).slice(0, 80));
+                onDone();
+              }
+            });
+          } catch (e) {
+            onStep("激励视频", false, "SDK 异常");
+            onDone();
+          }
+          return;
+        }
+        if (++n > 20) {
+          clearInterval(t);
+          fail("加载超时（多为审核未过，SDK 未开通）");
+        }
+      }, 250);
+    };
+    setTimeout(() => fail("加载超时（多为审核未过，SDK 未开通）"), 1e4);
+    document.head.appendChild(s);
+  }
   var adCache = {};
 
   // src/Main.ts
@@ -543,6 +606,9 @@
       this.tourContent = null;
       this.tourRing = null;
       this.tourStep = 0;
+      this.adTestPanel = null;
+      this.adTestContent = null;
+      this.adTestLines = [];
       this.physicsPaused = false;
       this.bubbles = [];
       this.evoDots = [];
@@ -705,6 +771,69 @@
         this.showTour();
       });
       this.uiLayer.addChild(helpBtn);
+      const adBtn = this.makePillButton(410, 40, 132, 60, "#5aa9e5", "#ffffff", "广告测试");
+      adBtn.on(Laya.Event.MOUSE_DOWN, this, (e) => {
+        e.stopPropagation();
+        this.showAdTest();
+      });
+      this.uiLayer.addChild(adBtn);
+    }
+    /** 广告诊断面板：逐步显示真实链路状态（不走降级链） */
+    showAdTest() {
+      if (this.adTestPanel) return;
+      if (!this.gameOver) this.setPhysicsPaused(true);
+      const dim = new Laya.Sprite();
+      dim.size(Laya.stage.width, Laya.stage.height);
+      dim.pos(-this.world.x, 0);
+      dim.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000b3");
+      dim.mouseEnabled = true;
+      this.uiLayer.addChild(dim);
+      const content = new Laya.Sprite();
+      this.uiLayer.addChild(content);
+      this.adTestPanel = dim;
+      this.adTestContent = content;
+      const card = new Laya.Sprite();
+      card.size(660, 760).pos(45, 260);
+      card.mouseEnabled = true;
+      card.graphics.drawRect(0, 0, 660, 760, "#fff8ea", "#d9a15c", 4);
+      content.addChild(card);
+      card.on(Laya.Event.MOUSE_DOWN, this, (e) => e.stopPropagation());
+      const title = new Laya.Text();
+      title.pos(0, 20).size(660, 40);
+      title.fontSize = 34;
+      title.color = "#5a4632";
+      title.bold = true;
+      title.align = "center";
+      title.text = "广告链路诊断";
+      card.addChild(title);
+      const mkLine = () => {
+        const t = new Laya.Text();
+        t.pos(40, 80 + this.adTestLines.length * 76).size(580, 72);
+        t.fontSize = 24;
+        t.color = "#5a4632";
+        t.valign = "middle";
+        t.text = "…";
+        card.addChild(t);
+        this.adTestLines.push(t);
+        return t;
+      };
+      const closeBtn = this.makePillButton(330, 640, 260, 84, "#5fb75f", "#ffffff", "关闭");
+      closeBtn.on(Laya.Event.MOUSE_DOWN, this, (e) => {
+        e.stopPropagation();
+        dim.destroy();
+        content.destroy();
+        this.adTestPanel = null;
+        this.adTestContent = null;
+        this.adTestLines = [];
+        this.setPhysicsPaused(false);
+      });
+      card.addChild(closeBtn);
+      testRewardedAd((step, ok, detail) => {
+        const t = mkLine();
+        t.text = (ok ? "✓ " : "✗ ") + step + ": " + detail;
+        t.color = ok ? "#3d8f3f" : "#e5484d";
+      }, () => {
+      });
     }
     /** 冻结/恢复物理与游戏节奏（排行榜面板打开时暂停） */
     setPhysicsPaused(paused) {
@@ -870,6 +999,15 @@
         this.nameContent.destroy();
         this.nameContent = null;
       }
+      if (this.adTestPanel) {
+        this.adTestPanel.destroy();
+        this.adTestPanel = null;
+      }
+      if (this.adTestContent) {
+        this.adTestContent.destroy();
+        this.adTestContent = null;
+      }
+      this.adTestLines = [];
       if (this.reviveDim) {
         this.reviveDim.destroy();
         this.reviveDim = null;
