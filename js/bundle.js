@@ -84,6 +84,8 @@
       /** 上一帧位置 */
       this.lastX = 0;
       this.lastY = 0;
+      /** 压线判负豁免截止时间（投放 500ms / 合成产物 1200ms） */
+      this.graceUntil = 0;
       this.level = level;
       const def = FRUITS[level];
       const r = def.radius;
@@ -460,7 +462,6 @@
       this.mockAdDim = null;
       this.goScoreText = null;
       this.goBestText = null;
-      // ---- 新手引导 ----
       this.tourDim = null;
       this.tourContent = null;
       this.tourRing = null;
@@ -609,6 +610,8 @@
       this.aimLine.pos(375, 0);
       this.aimLine.alpha = 0.5;
       this.uiLayer.addChild(this.aimLine);
+      this.warnLayer = new Laya.Sprite();
+      this.uiLayer.addChild(this.warnLayer);
       const lbBtn = this.makePillButton(96, 40, 152, 60, "#f7ce46", "#5a4632", "排行榜");
       lbBtn.on(Laya.Event.MOUSE_DOWN, this, (e) => {
         e.stopPropagation();
@@ -889,6 +892,7 @@
       const r = f.radius;
       f.pos(x - r, y - r);
       f.bornAt = Date.now();
+      f.graceUntil = f.bornAt + 500;
       f.lastX = f.x;
       f.lastY = f.y;
       this.gameLayer.addChild(f);
@@ -958,6 +962,7 @@
             Math.min(this.WALL_R - newDef.radius, cxm)
           );
           const newFruit = this.spawnFruit(level + 1, cx, cy);
+          newFruit.graceUntil = Date.now() + 1200;
           this.addScore(newDef.score * mult, cx, cy - newDef.radius, mult);
           this.burst(cx, cy, 8 + level, newDef.light);
           if (level + 1 >= 8) confetti(this.fxLayer, 26);
@@ -1011,14 +1016,16 @@
         f.lastX = f.x;
         f.lastY = f.y;
       }
+      const warnings = [];
       let danger = false;
       if (!this.gameOver) {
         for (const f of this.fruits) {
-          if (Date.now() - f.bornAt < 500) continue;
+          if (Date.now() < f.graceUntil) continue;
           const cy = this.fruitCenter(f).y;
           if (cy < this.DANGER_Y && f.speed < this.SETTLE_SPEED) {
             f.overSince += dt;
             danger = true;
+            warnings.push({ f, over: f.overSince });
             if (f.overSince > 2e3) {
               this.doGameOver();
               break;
@@ -1028,7 +1035,18 @@
           }
         }
       }
-      this.dangerLine.alpha = danger ? 0.35 + 0.65 * (Math.sin(Date.now() / 90) * 0.5 + 0.5) : Math.max(0, this.dangerLine.alpha - 0.05);
+      this.dangerLine.alpha = danger ? 0.55 + 0.45 * (Math.sin(Date.now() / 90) * 0.5 + 0.5) : Math.max(0, this.dangerLine.alpha - 0.05);
+      this.warnLayer.graphics.clear();
+      if (warnings.length > 0) {
+        for (const w of warnings) {
+          const c = this.fruitCenter(w.f);
+          const prog = Math.min(1, w.over / 2e3);
+          this.warnLayer.graphics.drawCircle(c.x, c.y, w.f.radius + 10, null, "#ff4444", 4 + prog * 5);
+          const bw = 90;
+          this.warnLayer.graphics.drawRect(c.x - bw / 2, c.y - w.f.radius - 30, bw, 10, "#5a463288");
+          this.warnLayer.graphics.drawRect(c.x - bw / 2, c.y - w.f.radius - 30, bw * prog, 10, "#ff4444");
+        }
+      }
       if (this.shakeT > 0) {
         this.shakeT -= dt / 1e3;
         const s = Math.max(0, this.shakeT) * 40;
