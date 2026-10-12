@@ -460,12 +460,26 @@
       this.mockAdDim = null;
       this.goScoreText = null;
       this.goBestText = null;
+      // ---- 新手引导 ----
+      this.tourDim = null;
+      this.tourContent = null;
+      this.tourRing = null;
+      this.tourStep = 0;
       this.physicsPaused = false;
       this.bubbles = [];
       this.evoDots = [];
       this.overPanel = null;
       // ---- 音效（WebAudio 免素材）----
       this.audioCtx = null;
+      // ==================================================================
+      // 新手引导 / 玩法介绍
+      // ==================================================================
+      this.TOUR_STEPS = [
+        { x: 375, y: 250, w: 300, h: 300, round: true, title: "投放水果", text: "按住屏幕左右拖动瞄准\n松手投放水果" },
+        { x: 375, y: 430, w: 660, h: 90, round: false, title: "危险线", text: "水果堆过红色虚线 2 秒\n本局就结束了" },
+        { x: 375, y: 196, w: 620, h: 70, round: false, title: "合成升级", text: "相同水果相碰合成更大的\n从樱桃一路合到西瓜" },
+        { x: 96, y: 66, w: 170, h: 70, round: true, title: "每日挑战", text: "全球玩家每天同一序列\n点排行榜看你的排名" }
+      ];
     }
     onStart() {
       try {
@@ -488,6 +502,7 @@
       this.buildAmbience();
       root.mouseEnabled = true;
       if (root.parent) root.parent.mouseEnabled = true;
+      this.world.mouseEnabled = true;
       this.uiLayer.mouseEnabled = true;
       this.centerWorld();
       Laya.stage.on(Laya.Event.RESIZE, this, this.centerWorld);
@@ -600,12 +615,112 @@
         this.showLeaderboard();
       });
       this.uiLayer.addChild(lbBtn);
+      const helpBtn = this.makePillButton(262, 66, 132, 62, "#5fb75f", "#ffffff", "玩法");
+      helpBtn.on(Laya.Event.MOUSE_DOWN, this, (e) => {
+        e.stopPropagation();
+        this.showTour();
+      });
+      this.uiLayer.addChild(helpBtn);
     }
     /** 冻结/恢复物理与游戏节奏（排行榜面板打开时暂停） */
     setPhysicsPaused(paused) {
       if (this.physicsPaused === paused) return;
       this.physicsPaused = paused;
       Laya.physicsTimer.scale = paused ? 0 : 1;
+    }
+    /** 首次进入自动触发；「玩法」按钮可随时重看 */
+    showTour() {
+      if (this.tourDim) return;
+      try {
+        Laya.LocalStorage.setItem("sg_toured", "1");
+      } catch (e) {
+      }
+      this.tourStep = 0;
+      const dim = new Laya.Sprite();
+      dim.pos(-this.world.x, 0);
+      dim.size(Laya.stage.width, Laya.stage.height);
+      dim.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000b0");
+      dim.mouseEnabled = true;
+      dim.on(Laya.Event.MOUSE_DOWN, this, (e) => {
+        e.stopPropagation();
+        this.nextTourStep();
+      });
+      this.uiLayer.addChild(dim);
+      this.tourDim = dim;
+      const content = new Laya.Sprite();
+      this.uiLayer.addChild(content);
+      this.tourContent = content;
+      this.tourRing = new Laya.Sprite();
+      content.addChild(this.tourRing);
+      const card = new Laya.Sprite();
+      card.graphics.drawRoundRect(0, 0, 600, 220, 24, 24, 24, 24, "#fff8ea", "#d9a15c", 4);
+      card.pos(75, 990);
+      content.addChild(card);
+      const title = new Laya.Text();
+      title.pos(0, 28).size(600, 46);
+      title.fontSize = 36;
+      title.color = "#5a4632";
+      title.bold = true;
+      title.align = "center";
+      card.addChild(title);
+      card.__title = title;
+      const body = new Laya.Text();
+      body.pos(0, 92).size(600, 80);
+      body.fontSize = 28;
+      body.color = "#7a684e";
+      body.align = "center";
+      body.valign = "middle";
+      card.addChild(body);
+      card.__body = body;
+      const counter = new Laya.Text();
+      counter.pos(0, 178).size(600, 26);
+      counter.fontSize = 22;
+      counter.color = "#c9bda2";
+      counter.align = "center";
+      counter.text = "轻点任意位置继续";
+      card.addChild(counter);
+      card.__counter = counter;
+      this.applyTourStep();
+    }
+    applyTourStep() {
+      if (!this.tourContent || !this.tourRing) return;
+      const s = this.TOUR_STEPS[this.tourStep];
+      const ring = this.tourRing;
+      ring.graphics.clear();
+      ring.pos(s.x - s.w / 2, s.y - s.h / 2);
+      if (s.round) {
+        ring.graphics.drawCircle(s.w / 2, s.h / 2, Math.min(s.w, s.h) / 2 - 4, null, "#ffe08a", 6);
+      } else {
+        ring.graphics.drawRoundRect(0, 0, s.w, s.h, 16, 16, 16, 16, null, "#ffe08a", 6);
+      }
+      ring.scale(1, 1);
+      Laya.Tween.to(ring, { scaleX: 1.05, scaleY: 1.05 }, 500, Laya.Ease.sineInOut, Laya.Handler.create(null, () => {
+        Laya.Tween.to(ring, { scaleX: 1, scaleY: 1 }, 500, Laya.Ease.sineInOut);
+      }));
+      const card = this.tourContent.getChildAt(1);
+      if (card) {
+        card.__title.text = `${this.tourStep + 1}/${this.TOUR_STEPS.length} · ${s.title}`;
+        card.__body.text = s.text;
+      }
+    }
+    nextTourStep() {
+      this.tourStep++;
+      if (this.tourStep >= this.TOUR_STEPS.length) {
+        this.closeTour();
+      } else {
+        this.applyTourStep();
+      }
+    }
+    closeTour() {
+      if (this.tourDim) {
+        this.tourDim.destroy();
+        this.tourDim = null;
+      }
+      if (this.tourContent) {
+        this.tourContent.destroy();
+        this.tourContent = null;
+      }
+      this.tourRing = null;
     }
     makeText(x, y, w, h, size, color, bold) {
       const t = new Laya.Text();
@@ -721,7 +836,7 @@
     // ==================================================================
     onMouseDown(e) {
       var _a;
-      if (this.lbPanel || Date.now() < this.inputLockUntil) return;
+      if (this.lbPanel || this.tourDim || Date.now() < this.inputLockUntil) return;
       this.ensureAudio();
       if (this.gameOver) {
         if (this.shareCard) return;
@@ -732,11 +847,11 @@
       this.moveCurrent(e.stageX);
     }
     onMouseMove(e) {
-      if (this.gameOver || this.lbPanel || Date.now() < this.inputLockUntil || !this.isPrimaryTouch(e)) return;
+      if (this.gameOver || this.lbPanel || this.tourDim || Date.now() < this.inputLockUntil || !this.isPrimaryTouch(e)) return;
       this.moveCurrent(e.stageX);
     }
     onMouseUp(e) {
-      if (this.gameOver || this.lbPanel || Date.now() < this.inputLockUntil || !this.physicsReady || !this.isPrimaryTouch(e) || !this.currentFruit || this.dropCooldown > 0) return;
+      if (this.gameOver || this.lbPanel || this.tourDim || Date.now() < this.inputLockUntil || !this.physicsReady || !this.isPrimaryTouch(e) || !this.currentFruit || this.dropCooldown > 0) return;
       const c = this.fruitCenter(this.currentFruit);
       const f = this.spawnFruit(this.currentFruit.level, c.x, this.DROP_Y, true, "none");
       squash(f);
@@ -876,6 +991,10 @@
         this.containerBuilt = true;
         this.buildContainer();
         this.resetRound();
+        try {
+          if (!Laya.LocalStorage.getItem("sg_toured")) this.showTour();
+        } catch (e) {
+        }
       }
       const dt = Math.min(Laya.timer.delta, 50);
       if (!this.gameOver) this.processMerges();
@@ -960,6 +1079,7 @@
     showReviveOffer() {
       const dim = new Laya.Sprite();
       dim.pos(-this.world.x, 0);
+      dim.size(Laya.stage.width, Laya.stage.height);
       dim.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000cc");
       dim.mouseEnabled = true;
       dim.on(Laya.Event.MOUSE_DOWN, this, (e) => {
@@ -1063,6 +1183,7 @@
     showMockAd() {
       const dim = new Laya.Sprite();
       dim.pos(-this.world.x, 0);
+      dim.size(Laya.stage.width, Laya.stage.height);
       dim.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000e6");
       dim.mouseEnabled = true;
       dim.on(Laya.Event.MOUSE_DOWN, this, (e) => e.stopPropagation());
@@ -1088,6 +1209,7 @@
       this.scoreText.text = `${this.score}`;
       const dim = new Laya.Sprite();
       dim.pos(-this.world.x, 0);
+      dim.size(Laya.stage.width, Laya.stage.height);
       dim.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000b3");
       dim.mouseEnabled = true;
       dim.on(Laya.Event.MOUSE_DOWN, this, () => {
@@ -1199,6 +1321,7 @@
       if (!this.gameOver) this.setPhysicsPaused(true);
       const dim = new Laya.Sprite();
       dim.pos(-this.world.x, 0);
+      dim.size(Laya.stage.width, Laya.stage.height);
       dim.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000b3");
       dim.mouseEnabled = true;
       this.uiLayer.addChild(dim);
@@ -1269,6 +1392,7 @@
       }
       const dim = new Laya.Sprite();
       dim.pos(-this.world.x, 0);
+      dim.size(Laya.stage.width, Laya.stage.height);
       dim.graphics.drawRect(0, 0, Laya.stage.width, Laya.stage.height, "#000000b3");
       dim.mouseEnabled = true;
       this.uiLayer.addChild(dim);
