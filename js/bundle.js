@@ -348,6 +348,7 @@
     dailyExtra: "",
     bigStart: ""
   };
+  var GD_GAME_ID = "";
   function platform() {
     const g = globalThis;
     if (typeof g.wx !== "undefined" && g.wx && g.wx.createRewardedVideoAd) return "wx";
@@ -355,13 +356,94 @@
     return "web";
   }
   function isMock() {
-    return platform() === "web";
+    return platform() === "web" && !GD_GAME_ID;
+  }
+  var gdReady = null;
+  var gdDead = false;
+  var gdPending = null;
+  var gdPauseHook = null;
+  var gdResumeHook = null;
+  function setPauseHooks(pause, resume) {
+    gdPauseHook = pause;
+    gdResumeHook = resume;
+  }
+  function initGd() {
+    if (gdReady) return gdReady;
+    gdReady = new Promise((resolve, reject) => {
+      let settled = false;
+      const done = (ok) => {
+        if (!settled) {
+          settled = true;
+          ok ? resolve() : reject(new Error("gd init fail"));
+        }
+      };
+      window.GD_OPTIONS = {
+        gameId: GD_GAME_ID,
+        onEvent: (event) => {
+          switch (event.name) {
+            case "SDK_GAME_PAUSE":
+              gdPauseHook && gdPauseHook();
+              break;
+            case "SDK_GAME_START":
+              gdResumeHook && gdResumeHook();
+              break;
+            case "SDK_REWARDED_WATCH_COMPLETE":
+              if (gdPending) {
+                const p = gdPending;
+                gdPending = null;
+                p.onReward();
+              }
+              break;
+            case "AD_ERROR":
+            case "AD_SDK_STOP":
+              if (gdPending) {
+                const p = gdPending;
+                gdPending = null;
+                p.onFail("ad error");
+              }
+              break;
+          }
+        }
+      };
+      const s = document.createElement("script");
+      s.src = "https://html5.gamedistribution.com/sdk/html5/gd-api.js";
+      s.onload = () => done(true);
+      s.onerror = () => {
+        gdDead = true;
+        done(false);
+      };
+      document.head.appendChild(s);
+      setTimeout(() => {
+        if (!settled) done(false);
+      }, 8e3);
+    });
+    return gdReady;
   }
   var adCache = {};
+  var mockReward = (onReward) => setTimeout(onReward, 1200);
   function showRewardedVideo(placement, onReward, onFail) {
     const pf = platform();
     if (pf === "web") {
-      setTimeout(onReward, 1200);
+      if (!GD_GAME_ID || gdDead) {
+        mockReward(onReward);
+        return;
+      }
+      initGd().then(() => {
+        gdPending = { onReward, onFail };
+        const gdsdk = window.gdsdk;
+        if (!gdsdk || !gdsdk.showAd) {
+          gdPending = null;
+          mockReward(onReward);
+          return;
+        }
+        gdsdk.showAd("rewarded").catch(() => {
+          if (gdPending) {
+            const p = gdPending;
+            gdPending = null;
+            p.onFail("show failed");
+          }
+        });
+      }).catch(() => mockReward(onReward));
       return;
     }
     const api = pf === "wx" ? globalThis.wx : globalThis.tt;
@@ -507,6 +589,12 @@
       this.centerWorld();
       Laya.stage.on(Laya.Event.RESIZE, this, this.centerWorld);
       this.buildHUD();
+      setPauseHooks(
+        () => this.setPhysicsPaused(true),
+        () => {
+          if (!this.gameOver && !this.lbPanel && !this.tourDim) this.setPhysicsPaused(false);
+        }
+      );
       Laya.stage.on(Laya.Event.MOUSE_DOWN, this, this.onMouseDown);
       Laya.stage.on(Laya.Event.MOUSE_MOVE, this, this.onMouseMove);
       Laya.stage.on(Laya.Event.MOUSE_UP, this, this.onMouseUp);
