@@ -348,7 +348,7 @@
     dailyExtra: "",
     bigStart: ""
   };
-  var GD_GAME_ID = "";
+  var GM_GAME_ID = "";
   function platform() {
     const g = globalThis;
     if (typeof g.wx !== "undefined" && g.wx && g.wx.createRewardedVideoAd) return "wx";
@@ -356,93 +356,83 @@
     return "web";
   }
   function isMock() {
-    return platform() === "web" && !GD_GAME_ID;
+    return platform() === "web" && !GM_GAME_ID;
   }
-  var gdReady = null;
-  var gdDead = false;
-  var gdPending = null;
-  var gdPauseHook = null;
-  var gdResumeHook = null;
+  var gmReady = null;
+  var gmDead = false;
+  var advPauseHook = null;
+  var advResumeHook = null;
   function setPauseHooks(pause, resume) {
-    gdPauseHook = pause;
-    gdResumeHook = resume;
+    advPauseHook = pause;
+    advResumeHook = resume;
   }
-  function initGd() {
-    if (gdReady) return gdReady;
-    gdReady = new Promise((resolve, reject) => {
+  function initGm() {
+    if (gmReady) return gmReady;
+    gmReady = new Promise((resolve, reject) => {
       let settled = false;
       const done = (ok) => {
         if (!settled) {
           settled = true;
-          ok ? resolve() : reject(new Error("gd init fail"));
-        }
-      };
-      window.GD_OPTIONS = {
-        gameId: GD_GAME_ID,
-        onEvent: (event) => {
-          switch (event.name) {
-            case "SDK_GAME_PAUSE":
-              gdPauseHook && gdPauseHook();
-              break;
-            case "SDK_GAME_START":
-              gdResumeHook && gdResumeHook();
-              break;
-            case "SDK_REWARDED_WATCH_COMPLETE":
-              if (gdPending) {
-                const p = gdPending;
-                gdPending = null;
-                p.onReward();
-              }
-              break;
-            case "AD_ERROR":
-            case "AD_SDK_STOP":
-              if (gdPending) {
-                const p = gdPending;
-                gdPending = null;
-                p.onFail("ad error");
-              }
-              break;
-          }
+          ok ? resolve() : reject(new Error("gm init fail"));
         }
       };
       const s = document.createElement("script");
-      s.src = "https://html5.gamedistribution.com/sdk/html5/gd-api.js";
-      s.onload = () => done(true);
+      s.src = `https://html5.gamemonetize.com/embed.js?g=${GM_GAME_ID}`;
+      s.onload = () => {
+        let n = 0;
+        const t = setInterval(() => {
+          if (typeof window.SDK === "function") {
+            clearInterval(t);
+            done(true);
+            return;
+          }
+          if (++n > 25) {
+            clearInterval(t);
+            gmDead = true;
+            done(false);
+          }
+        }, 200);
+      };
       s.onerror = () => {
-        gdDead = true;
+        gmDead = true;
         done(false);
       };
       document.head.appendChild(s);
       setTimeout(() => {
-        if (!settled) done(false);
+        if (!settled) {
+          gmDead = true;
+          done(false);
+        }
       }, 8e3);
     });
-    return gdReady;
+    return gmReady;
   }
-  var adCache = {};
   var mockReward = (onReward) => setTimeout(onReward, 1200);
   function showRewardedVideo(placement, onReward, onFail) {
     const pf = platform();
     if (pf === "web") {
-      if (!GD_GAME_ID || gdDead) {
+      if (!GM_GAME_ID || gmDead) {
         mockReward(onReward);
         return;
       }
-      initGd().then(() => {
-        gdPending = { onReward, onFail };
-        const gdsdk = window.gdsdk;
-        if (!gdsdk || !gdsdk.showAd) {
-          gdPending = null;
-          mockReward(onReward);
-          return;
+      let finished = false;
+      const finish = (rewarded, reason) => {
+        if (finished) return;
+        finished = true;
+        advResumeHook && advResumeHook();
+        rewarded ? onReward() : onFail(reason);
+      };
+      initGm().then(() => {
+        advPauseHook && advPauseHook();
+        try {
+          const sdk = window.SDK();
+          sdk.adv.show("rewarded", {
+            onClose: (wasRewarded) => finish(!!wasRewarded, wasRewarded ? "" : "未完整观看"),
+            onError: () => finish(false, "广告播放失败")
+          });
+        } catch (e) {
+          finish(false, "SDK 异常");
         }
-        gdsdk.showAd("rewarded").catch(() => {
-          if (gdPending) {
-            const p = gdPending;
-            gdPending = null;
-            p.onFail("show failed");
-          }
-        });
       }).catch(() => mockReward(onReward));
       return;
     }
@@ -470,6 +460,7 @@
       });
     });
   }
+  var adCache = {};
 
   // src/Main.ts
   var { regClass } = Laya;
