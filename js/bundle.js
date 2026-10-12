@@ -360,6 +360,8 @@
   }
   var gmReady = null;
   var gmDead = false;
+  var gmUseLegacyBanner = false;
+  var gmLegacyPending = null;
   var advPauseHook = null;
   var advResumeHook = null;
   function setPauseHooks(pause, resume) {
@@ -376,39 +378,59 @@
           ok ? resolve() : reject(new Error("gm init fail"));
         }
       };
-      const arm = () => {
-        let n = 0;
-        const t = setInterval(() => {
-          if (typeof window.SDK === "function") {
-            clearInterval(t);
+      const handleEvent = (a) => {
+        switch (a.name) {
+          case "SDK_GAME_PAUSE":
+            advPauseHook && advPauseHook();
+            break;
+          case "SDK_GAME_START":
+            advResumeHook && advResumeHook();
+            if (gmLegacyPending) {
+              const cb = gmLegacyPending;
+              gmLegacyPending = null;
+              cb();
+            }
+            break;
+          case "SDK_READY":
             done(true);
-            return;
-          }
-          if (++n > 25) {
-            clearInterval(t);
-            gmDead = true;
-            done(false);
-          }
-        }, 200);
+            break;
+        }
       };
-      if (document.querySelector('script[src*="gamemonetize"]')) {
-        arm();
-        return;
+      const prevHandler = window.__gmOnEvent;
+      window.__gmOnEvent = (a) => {
+        if (prevHandler) prevHandler(a);
+        handleEvent(a);
+      };
+      if (!document.getElementById("gamemonetize-sdk")) {
+        window.SDK_OPTIONS = { gameId: GM_GAME_ID, onEvent: (a) => handleEvent(a) };
+        const s = document.createElement("script");
+        s.id = "gamemonetize-sdk";
+        s.src = "https://api.gamemonetize.com/sdk.js";
+        s.onerror = () => {
+          gmDead = true;
+          done(false);
+        };
+        document.head.appendChild(s);
       }
-      const s = document.createElement("script");
-      s.src = `https://html5.gamemonetize.com/embed.js?g=${GM_GAME_ID}`;
-      s.onload = arm;
-      s.onerror = () => {
-        gmDead = true;
-        done(false);
-      };
-      document.head.appendChild(s);
+      let n = 0;
+      const t = setInterval(() => {
+        if (typeof window.sdk !== "undefined") {
+          clearInterval(t);
+          done(true);
+          return;
+        }
+        if (++n > 40) {
+          clearInterval(t);
+          gmDead = true;
+          done(false);
+        }
+      }, 200);
       setTimeout(() => {
         if (!settled) {
           gmDead = true;
           done(false);
         }
-      }, 8e3);
+      }, 9e3);
     });
     return gmReady;
   }
@@ -430,11 +452,23 @@
       initGm().then(() => {
         advPauseHook && advPauseHook();
         try {
-          const sdk = window.SDK();
-          sdk.adv.show("rewarded", {
-            onClose: (wasRewarded) => finish(!!wasRewarded, wasRewarded ? "" : "未完整观看"),
-            onError: () => finish(false, "广告播放失败")
-          });
+          const sdk = window.sdk;
+          if (sdk && sdk.adv && sdk.adv.show) {
+            gmUseLegacyBanner = false;
+            sdk.adv.show("rewarded", {
+              onClose: (wasRewarded) => finish(!!wasRewarded, wasRewarded ? "" : "未完整观看"),
+              onError: () => finish(false, "广告播放失败")
+            });
+          } else if (sdk && typeof sdk.showBanner === "function") {
+            gmUseLegacyBanner = true;
+            gmLegacyPending = () => finish(true, "");
+            sdk.showBanner();
+            setTimeout(() => {
+              if (!finished) finish(false, "广告超时");
+            }, 6e4);
+          } else {
+            finish(false, "SDK 接口缺失");
+          }
         } catch (e) {
           finish(false, "SDK 异常");
         }
@@ -477,57 +511,54 @@
       onDone();
       return;
     }
-    fetch(`https://html5.gamemonetize.com/embed.js?g=${GM_GAME_ID}&t=${Date.now()}`, { mode: "no-cors", cache: "no-store" }).then(() => onStep("网络", true, "可达")).catch(() => onStep("网络", false, "不可达（DNS/防火墙/代理拦截）"));
-    const s = document.createElement("script");
-    s.src = `https://html5.gamemonetize.com/embed.js?g=${GM_GAME_ID}&t=${Date.now()}`;
-    let settled = false;
-    const fail = (msg) => {
-      if (settled) return;
-      settled = true;
-      onStep("SDK 加载", false, msg);
-      onDone();
-    };
-    s.onerror = () => fail("服务器拒绝(404)：游戏未过审或 ID 有误（去 GM 后台看状态）");
-    s.onload = () => {
-      let n = 0;
-      const t = setInterval(() => {
-        if (typeof window.SDK === "function") {
-          clearInterval(t);
-          if (settled) return;
-          settled = true;
-          onStep("SDK 加载", true, "就绪");
-          try {
-            const sdk = window.SDK();
-            if (!sdk || !sdk.adv || !sdk.adv.show) {
-              onStep("激励视频", false, "adv 接口缺失");
+    fetch("https://api.gamemonetize.com/sdk.js?t=" + Date.now(), { mode: "no-cors", cache: "no-store" }).then(() => onStep("网络", true, "可达")).catch(() => onStep("网络", false, "不可达（DNS/防火墙/代理）"));
+    initGm().then(() => {
+      onStep("SDK 加载", true, "就绪");
+      const sdk = window.sdk;
+      if (!sdk) {
+        onStep("sdk 全局", false, "未出现");
+        onDone();
+        return;
+      }
+      const hasAdv = !!(sdk.adv && sdk.adv.show);
+      const hasBanner = typeof sdk.showBanner === "function";
+      onStep("sdk 全局", true, hasAdv ? "新版(adv.show 激励)" : hasBanner ? "旧版(showBanner)" : "无广告接口");
+      if (!hasAdv && !hasBanner) {
+        onDone();
+        return;
+      }
+      onStep("激励视频", true, "请求中…（看完/关闭后出结果）");
+      try {
+        if (hasAdv) {
+          sdk.adv.show("rewarded", {
+            onClose: (wasRewarded) => {
+              onStep("广告结果", !!wasRewarded, wasRewarded ? "完整观看 ✓（计费有效）" : "中途关闭（不计费）");
               onDone();
-              return;
+            },
+            onError: (err) => {
+              onStep("广告结果", false, "错误: " + String(err && err.message || err).slice(0, 80));
+              onDone();
             }
-            onStep("激励视频", true, "请求中…（看完/关闭后出结果）");
-            sdk.adv.show("rewarded", {
-              onClose: (wasRewarded) => {
-                onStep("广告结果", !!wasRewarded, wasRewarded ? "完整观看 ✓（计费有效）" : "中途关闭（不计费）");
-                onDone();
-              },
-              onError: (err) => {
-                onStep("广告结果", false, "错误: " + String(err && err.message || err).slice(0, 80));
-                onDone();
-              }
-            });
-          } catch (e) {
-            onStep("激励视频", false, "SDK 异常");
+          });
+        } else {
+          gmLegacyPending = () => {
+            onStep("广告结果", true, "Banner 已展示并结束（旧版接口）");
             onDone();
-          }
-          return;
+          };
+          sdk.showBanner();
+          setTimeout(() => {
+            onStep("广告结果", false, "Banner 超时");
+            onDone();
+          }, 6e4);
         }
-        if (++n > 20) {
-          clearInterval(t);
-          fail("加载超时（多为审核未过，SDK 未开通）");
-        }
-      }, 250);
-    };
-    setTimeout(() => fail("加载超时（多为审核未过，SDK 未开通）"), 1e4);
-    document.head.appendChild(s);
+      } catch (e) {
+        onStep("激励视频", false, "SDK 异常");
+        onDone();
+      }
+    }).catch(() => {
+      onStep("SDK 加载", false, "失败（网络/游戏未激活，去 GM 后台 REQUEST ACTIVATION）");
+      onDone();
+    });
   }
   var adCache = {};
 
